@@ -1,6 +1,6 @@
 <div id="chat_room" hx-swap-oob="beforeend">
-    <li id="message" class="flex my-2">
-        <h1 class="text-base font-bold mr-2 text-red-500">{{ .ClientID }}: </h1>
-        <p class="text-base"> {{ .Message }} </p>
+    <li id="message" class="text-right" >
+        <h4> Username: {{ .ClientID }} </h4>
+        <p class="inline-block bg-blue-500 text-white rounded px-4 py-2"> {{ .Text }} </p>
     </li>
 </div>
