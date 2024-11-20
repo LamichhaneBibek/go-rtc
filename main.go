@@ -20,7 +20,7 @@ func main() {
 		w.Write([]byte("Welcome to the home page"))
 	})
 
-	http.ListenAndServe(":8080", nil)
+	http.ListenAndServe("0.0.0.0:8080", nil)
 }
 
 func serveIndex(w http.ResponseWriter, r *http.Request) {
