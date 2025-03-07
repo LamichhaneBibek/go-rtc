@@ -55,22 +55,25 @@
                 flex-direction: column;
                 opacity: 0;
                 animation: fadeIn 0.5s forwards;
-                max-width: 80%;
             }
             @keyframes fadeIn {
                 to {
                     opacity: 1;
                 }
             }
+            /* Improved bubble styling */
             .bubble {
                 display: inline-block;
                 padding: 10px;
                 border-radius: 15px;
-                word-wrap: break-word;
                 background-color: #e9ecef;
                 border: 1px solid #ced4da;
                 color: #333;
                 box-shadow: 1px 1px 5px rgba(0, 0, 0, 0.1);
+                /* Bubble width is determined by content, with a maximum width */
+                max-width: 80%;
+                /* Let the bubble shrink to its content */
+                width: auto;
             }
             .sent {
                 align-self: flex-end;
