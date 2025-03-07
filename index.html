@@ -55,6 +55,7 @@
                 flex-direction: column;
                 opacity: 0;
                 animation: fadeIn 0.5s forwards;
+                max-width: 80%;
             }
             @keyframes fadeIn {
                 to {
@@ -65,13 +66,19 @@
                 display: inline-block;
                 padding: 10px;
                 border-radius: 15px;
-                max-width: 80%;
-                width: auto;
                 word-wrap: break-word;
                 background-color: #e9ecef;
                 border: 1px solid #ced4da;
                 color: #333;
                 box-shadow: 1px 1px 5px rgba(0, 0, 0, 0.1);
+            }
+            .sent {
+                align-self: flex-end;
+                text-align: right;
+            }
+            .received {
+                align-self: flex-start;
+                text-align: left;
             }
             .timestamp {
                 font-size: 0.8em;
@@ -200,10 +207,17 @@
                 return color;
             }
 
-            // Append a message to the chat window.
+            // Append a message to the chat window with alignment based on sender.
             function appendMessage(messageData) {
                 var msgDiv = document.createElement("div");
                 msgDiv.classList.add("message");
+
+                // Determine if this is a sent or received message.
+                if (messageData.username === username) {
+                    msgDiv.classList.add("sent");
+                } else {
+                    msgDiv.classList.add("received");
+                }
 
                 var bubbleDiv = document.createElement("div");
                 bubbleDiv.classList.add("bubble");
@@ -211,6 +225,7 @@
                 var sender = messageData.username;
                 var text = messageData.content;
 
+                // Set bubble color (System messages get default styling).
                 if (sender !== "System") {
                     var senderColor = stringToColor(sender);
                     bubbleDiv.style.backgroundColor = senderColor + "20"; // light background with transparency
