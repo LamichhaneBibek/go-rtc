@@ -1,0 +1,298 @@
+<!doctype html>
+<html>
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Interactive Chat Application</title>
+        <style>
+            html {
+                scroll-behavior: smooth;
+            }
+            body {
+                font-family: Arial, sans-serif;
+                background: #f4f4f9;
+                margin: 0;
+                padding: 0;
+                display: flex;
+                flex-direction: column;
+                height: 100vh;
+            }
+            #chat-container {
+                flex: 1;
+                display: flex;
+                flex-direction: column;
+                max-width: 800px;
+                margin: auto;
+                width: 100%;
+                padding: 10px;
+                box-sizing: border-box;
+            }
+            #chat {
+                flex: 1;
+                border: 1px solid #ccc;
+                background: #fff;
+                border-radius: 5px;
+                padding: 10px;
+                overflow-y: auto;
+                margin-bottom: 10px;
+                scroll-behavior: smooth;
+            }
+            /* Custom scrollbar for Webkit browsers */
+            #chat::-webkit-scrollbar {
+                width: 8px;
+            }
+            #chat::-webkit-scrollbar-track {
+                background: #f1f1f1;
+                border-radius: 5px;
+            }
+            #chat::-webkit-scrollbar-thumb {
+                background: #ccc;
+                border-radius: 5px;
+            }
+            .message {
+                margin: 8px 0;
+                display: flex;
+                flex-direction: column;
+                opacity: 0;
+                animation: fadeIn 0.5s forwards;
+            }
+            @keyframes fadeIn {
+                to {
+                    opacity: 1;
+                }
+            }
+            .bubble {
+                display: inline-block;
+                padding: 10px;
+                border-radius: 15px;
+                max-width: 80%;
+                width: auto;
+                word-wrap: break-word;
+                background-color: #e9ecef;
+                border: 1px solid #ced4da;
+                color: #333;
+                box-shadow: 1px 1px 5px rgba(0, 0, 0, 0.1);
+            }
+            .timestamp {
+                font-size: 0.8em;
+                color: #666;
+                margin-top: 3px;
+            }
+            #input-area {
+                display: flex;
+            }
+            #message {
+                flex: 1;
+                padding: 10px;
+                border: 1px solid #ccc;
+                border-radius: 5px;
+                margin-right: 5px;
+                box-sizing: border-box;
+            }
+            #send {
+                padding: 10px 20px;
+                border: none;
+                border-radius: 5px;
+                background: #007bff;
+                color: #fff;
+                cursor: pointer;
+            }
+            #send:hover {
+                background: #0056b3;
+            }
+            /* Modal for setting username */
+            #nameModal {
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0, 0, 0, 0.6);
+                display: flex;
+                justify-content: center;
+                align-items: center;
+            }
+            #nameModalContent {
+                background: #fff;
+                padding: 20px;
+                border-radius: 5px;
+                text-align: center;
+                width: 80%;
+                max-width: 400px;
+            }
+            #nameInput {
+                padding: 8px;
+                width: 80%;
+                margin-top: 10px;
+                box-sizing: border-box;
+            }
+            #setName {
+                margin-top: 10px;
+                padding: 8px 16px;
+                background: #28a745;
+                border: none;
+                color: #fff;
+                border-radius: 5px;
+                cursor: pointer;
+            }
+            #errorMsg {
+                color: red;
+                margin-top: 10px;
+            }
+            @media (max-width: 600px) {
+                #chat-container {
+                    padding: 5px;
+                }
+                #message {
+                    padding: 8px;
+                }
+                #send {
+                    padding: 8px 16px;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <div id="chat-container">
+            <div id="chat"></div>
+            <div id="input-area">
+                <input
+                    id="message"
+                    type="text"
+                    placeholder="Type a message..."
+                />
+                <button id="send">Send</button>
+            </div>
+        </div>
+        <!-- Modal for setting username -->
+        <div id="nameModal">
+            <div id="nameModalContent">
+                <h2>Welcome!</h2>
+                <p>Please enter your name:</p>
+                <input id="nameInput" type="text" placeholder="Your name" />
+                <br />
+                <button id="setName">Enter Chat</button>
+                <div id="errorMsg"></div>
+            </div>
+        </div>
+        <script>
+            var ws = new WebSocket("ws://" + window.location.host + "/ws");
+            var chat = document.getElementById("chat");
+            var messageInput = document.getElementById("message");
+            var sendButton = document.getElementById("send");
+            var nameModal = document.getElementById("nameModal");
+            var nameInput = document.getElementById("nameInput");
+            var setNameButton = document.getElementById("setName");
+            var errorMsg = document.getElementById("errorMsg");
+            var username = "";
+
+            // Generate a color from a string.
+            function stringToColor(str) {
+                var hash = 0;
+                for (var i = 0; i < str.length; i++) {
+                    hash = str.charCodeAt(i) + ((hash << 5) - hash);
+                }
+                var color = "#";
+                for (var i = 0; i < 3; i++) {
+                    var value = (hash >> (i * 8)) & 0xff;
+                    color += ("00" + value.toString(16)).substr(-2);
+                }
+                return color;
+            }
+
+            // Append a message to the chat window.
+            function appendMessage(messageData) {
+                var msgDiv = document.createElement("div");
+                msgDiv.classList.add("message");
+
+                var bubbleDiv = document.createElement("div");
+                bubbleDiv.classList.add("bubble");
+
+                var sender = messageData.username;
+                var text = messageData.content;
+
+                if (sender !== "System") {
+                    var senderColor = stringToColor(sender);
+                    bubbleDiv.style.backgroundColor = senderColor + "20"; // light background with transparency
+                    bubbleDiv.style.borderColor = senderColor;
+                } else {
+                    bubbleDiv.style.backgroundColor = "#f8f9fa";
+                    bubbleDiv.style.borderColor = "#ced4da";
+                }
+                bubbleDiv.textContent = text;
+
+                var timeSpan = document.createElement("div");
+                timeSpan.classList.add("timestamp");
+                var timestamp = new Date().toLocaleTimeString();
+                timeSpan.textContent = sender + " - " + timestamp;
+
+                msgDiv.appendChild(bubbleDiv);
+                msgDiv.appendChild(timeSpan);
+                chat.appendChild(msgDiv);
+                chat.scrollTop = chat.scrollHeight;
+            }
+
+            // Handle incoming messages.
+            ws.onmessage = function (evt) {
+                try {
+                    var messageData = JSON.parse(evt.data);
+                    if (messageData.type === "error") {
+                        errorMsg.textContent = messageData.content;
+                    } else if (messageData.type === "chat") {
+                        appendMessage(messageData);
+                    }
+                } catch (e) {
+                    console.error("Invalid message format", evt.data);
+                }
+            };
+
+            // Send a chat message.
+            function sendMessage() {
+                var text = messageInput.value.trim();
+                if (text === "") return;
+                var msg = { type: "chat", content: text };
+                ws.send(JSON.stringify(msg));
+                messageInput.value = "";
+            }
+
+            sendButton.onclick = sendMessage;
+            messageInput.addEventListener("keyup", function (e) {
+                if (e.keyCode === 13) {
+                    sendMessage();
+                }
+            });
+
+            // Set username and send setUsername message.
+            setNameButton.onclick = function () {
+                var name = nameInput.value.trim();
+                if (name === "") return;
+                var msg = { type: "setUsername", username: name };
+                ws.send(JSON.stringify(msg));
+            };
+
+            ws.onopen = function () {
+                console.log("Connected to WebSocket server.");
+            };
+            ws.onerror = function (err) {
+                console.error("WebSocket error:", err);
+            };
+
+            // Listen for successful join message to hide the username modal.
+            ws.addEventListener("message", function (evt) {
+                try {
+                    var messageData = JSON.parse(evt.data);
+                    if (
+                        messageData.type === "chat" &&
+                        messageData.content.indexOf("has joined the chat") !==
+                            -1
+                    ) {
+                        if (username === "") {
+                            username = nameInput.value.trim();
+                            nameModal.style.display = "none";
+                        }
+                    }
+                } catch (e) {}
+            });
+        </script>
+    </body>
+</html>
