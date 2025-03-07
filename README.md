@@ -59,8 +59,5 @@ Feel free to contribute to the project by opening issues or submitting pull requ
 
 For any questions or concerns, please contact.
 
-## Reference
-
-- [Tiago](https://www.youtube.com/watch?v=NPq3d2HkxWU&t=7s&ab_channel=Tiago)
 
 Happy chatting! 🚀
