@@ -4,97 +4,183 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
 )
 
-// Message defines the JSON message format exchanged between client and server.
 type Message struct {
 	Type     string `json:"type"`     // "setUsername", "chat", "error"
-	Username string `json:"username"` // used for setUsername and chat messages
-	Content  string `json:"content"`  // chat message content or error details
+	Username string `json:"username"` // username of sender
+	Content  string `json:"content"`  // chat content or error message
 }
 
-// Client represents a single chatting user.
 type Client struct {
 	conn     *websocket.Conn
 	send     chan []byte
 	username string
+	room     *Room
 }
 
-// Hub maintains the set of active clients and maps usernames.
-type Hub struct {
-	clients   map[*Client]bool
-	usernames map[string]*Client
-	broadcast chan []byte
-	register  chan *Client
+type Room struct {
+	name       string
+	clients    map[*Client]bool
+	usernames  map[string]*Client
+	broadcast  chan []byte
+	register   chan *Client
 	unregister chan *Client
+	lastActive time.Time
+	mu         sync.Mutex
+}
+
+type Hub struct {
+	rooms map[string]*Room
+	mu    sync.Mutex
 }
 
 func newHub() *Hub {
-	return &Hub{
+	h := &Hub{
+		rooms: make(map[string]*Room),
+	}
+	go h.cleanupRooms()
+	return h
+}
+
+func newRoom(name string) *Room {
+	room := &Room{
+		name:       name,
 		clients:    make(map[*Client]bool),
 		usernames:  make(map[string]*Client),
 		broadcast:  make(chan []byte),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
+		lastActive: time.Now(),
 	}
+	go room.run()
+	return room
 }
 
-// run listens for register, unregister, and broadcast events.
-func (h *Hub) run() {
+func (h *Hub) listRoomsHandler(w http.ResponseWriter, r *http.Request) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	rooms := make([]string, 0, len(h.rooms))
+	for name := range h.rooms {
+		rooms = append(rooms, name)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(rooms)
+}
+
+func (r *Room) run() {
 	for {
 		select {
-		case client := <-h.register:
-			h.clients[client] = true
+		case client := <-r.register:
+			r.mu.Lock()
+			r.clients[client] = true
+			r.lastActive = time.Now()
+			r.mu.Unlock()
 
-		case client := <-h.unregister:
-			if _, ok := h.clients[client]; ok {
-				delete(h.clients, client)
+		case client := <-r.unregister:
+			r.mu.Lock()
+			if _, ok := r.clients[client]; ok {
+				delete(r.clients, client)
 				if client.username != "" {
-					delete(h.usernames, client.username)
+					delete(r.usernames, client.username)
+					leaveMsg := Message{
+						Type:     "chat",
+						Username: "System",
+						Content:  client.username + " has left the chat.",
+					}
+					b, _ := json.Marshal(leaveMsg)
+					r.broadcast <- b
 				}
 				close(client.send)
 			}
+			r.lastActive = time.Now()
+			r.mu.Unlock()
 
-		case message := <-h.broadcast:
-			for client := range h.clients {
+		case message := <-r.broadcast:
+			r.mu.Lock()
+			for client := range r.clients {
 				select {
 				case client.send <- message:
 				default:
 					close(client.send)
-					delete(h.clients, client)
-					if client.username != "" {
-						delete(h.usernames, client.username)
-					}
+					delete(r.clients, client)
 				}
 			}
+			r.lastActive = time.Now()
+			r.mu.Unlock()
 		}
 	}
 }
 
-var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool {
-		// Allow all connections for simplicity.
-		return true
-	},
+func (h *Hub) cleanupRooms() {
+	ticker := time.NewTicker(1 * time.Minute)
+	for {
+		<-ticker.C
+		h.mu.Lock()
+		for name, room := range h.rooms {
+			room.mu.Lock()
+			if time.Since(room.lastActive) > 5*time.Minute {
+				for client := range room.clients {
+					client.conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"error","content":"Room closed due to inactivity."}`))
+					client.conn.Close()
+				}
+				delete(h.rooms, name)
+				log.Println("Deleted inactive room:", name)
+			}
+			room.mu.Unlock()
+		}
+		h.mu.Unlock()
+	}
 }
 
-// serveWs upgrades the HTTP connection to a WebSocket and registers the client.
+var upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool { return true },
+}
+
 func serveWs(hub *Hub, w http.ResponseWriter, r *http.Request) {
-	conn, err := upgrader.Upgrade(w, r, nil)
-	if err != nil {
-		log.Printf("WebSocket upgrade error: %v", err)
+	roomName := r.URL.Query().Get("room")
+	if roomName == "" {
+		http.Error(w, "Room name required", http.StatusBadRequest)
 		return
 	}
-	client := &Client{conn: conn, send: make(chan []byte, 256)}
-	hub.register <- client
+
+	hub.mu.Lock()
+	room, exists := hub.rooms[roomName]
+	if !exists {
+		room = newRoom(roomName)
+		hub.rooms[roomName] = room
+	}
+	room.mu.Lock()
+	if len(room.clients) >= 3 {
+		room.mu.Unlock()
+		hub.mu.Unlock()
+		http.Error(w, "Room is full (max 3 users)", http.StatusForbidden)
+		return
+	}
+	room.mu.Unlock()
+	hub.mu.Unlock()
+
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Println("WebSocket upgrade error:", err)
+		return
+	}
+	client := &Client{
+		conn: conn,
+		send: make(chan []byte, 256),
+		room: room,
+	}
+	room.register <- client
+
 	go client.writePump()
-	go client.readPump(hub)
+	go client.readPump()
 }
 
-// Timeouts and limits.
 const (
 	writeWait      = 10 * time.Second
 	pongWait       = 60 * time.Second
@@ -102,10 +188,9 @@ const (
 	maxMessageSize = 512
 )
 
-// readPump reads messages from the WebSocket connection.
-func (c *Client) readPump(hub *Hub) {
+func (c *Client) readPump() {
 	defer func() {
-		hub.unregister <- c
+		c.room.unregister <- c
 		c.conn.Close()
 	}()
 	c.conn.SetReadLimit(maxMessageSize)
@@ -114,14 +199,14 @@ func (c *Client) readPump(hub *Hub) {
 		c.conn.SetReadDeadline(time.Now().Add(pongWait))
 		return nil
 	})
+
 	for {
 		_, msg, err := c.conn.ReadMessage()
 		if err != nil {
 			break
 		}
 		var m Message
-		err = json.Unmarshal(msg, &m)
-		if err != nil {
+		if err := json.Unmarshal(msg, &m); err != nil {
 			continue
 		}
 
@@ -130,8 +215,8 @@ func (c *Client) readPump(hub *Hub) {
 			if m.Username == "" {
 				continue
 			}
-			// Check for duplicate username.
-			if _, exists := hub.usernames[m.Username]; exists {
+			c.room.mu.Lock()
+			if _, exists := c.room.usernames[m.Username]; exists {
 				errMsg := Message{
 					Type:    "error",
 					Content: "Username already taken, please choose another one.",
@@ -140,19 +225,18 @@ func (c *Client) readPump(hub *Hub) {
 				c.conn.WriteMessage(websocket.TextMessage, b)
 			} else {
 				c.username = m.Username
-				hub.usernames[m.Username] = c
-				// Broadcast join message.
+				c.room.usernames[m.Username] = c
 				joinMsg := Message{
 					Type:     "chat",
 					Username: "System",
 					Content:  m.Username + " has joined the chat.",
 				}
 				b, _ := json.Marshal(joinMsg)
-				hub.broadcast <- b
+				c.room.broadcast <- b
 			}
+			c.room.mu.Unlock()
 
 		case "chat":
-			// Ignore chat messages if username is not set.
 			if c.username == "" {
 				continue
 			}
@@ -162,12 +246,11 @@ func (c *Client) readPump(hub *Hub) {
 				Content:  m.Content,
 			}
 			b, _ := json.Marshal(chatMsg)
-			hub.broadcast <- b
+			c.room.broadcast <- b
 		}
 	}
 }
 
-// writePump writes messages from the hub to the WebSocket connection.
 func (c *Client) writePump() {
 	ticker := time.NewTicker(pingPeriod)
 	defer func() {
@@ -187,7 +270,7 @@ func (c *Client) writePump() {
 				return
 			}
 			w.Write(message)
-			// Write any queued messages.
+
 			n := len(c.send)
 			for i := 0; i < n; i++ {
 				w.Write([]byte{'\n'})
@@ -205,7 +288,6 @@ func (c *Client) writePump() {
 	}
 }
 
-// serveHome serves the chat UI.
 func serveHome(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.Error(w, "Not found", http.StatusNotFound)
@@ -220,9 +302,9 @@ func serveHome(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	hub := newHub()
-	go hub.run()
 
 	http.HandleFunc("/", serveHome)
+	http.HandleFunc("/rooms", hub.listRoomsHandler)
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		serveWs(hub, w, r)
 	})
