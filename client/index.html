@@ -1,0 +1,57 @@
+<!doctype html>
+<html>
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ChatHub - Modern Chat Application</title>
+    <link rel="stylesheet" href="/style.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" />
+</head>
+
+<body>
+    <!-- Sidebar -->
+    <div id="sidebar">
+        <div id="user-profile">
+            <div id="user-avatar"></div>
+            <div id="user-name">Guest</div>
+        </div>
+        <div id="room-list">
+            <!-- Rooms will be populated by JavaScript -->
+        </div>
+    </div>
+
+    <!-- Main Chat Area -->
+    <div id="chat-container">
+        <div id="chat-header">
+            <i class="fas fa-hashtag"></i>
+            <div id="current-room">General</div>
+        </div>
+        <div id="chat">
+            <!-- Messages will appear here -->
+        </div>
+        <div id="input-area">
+            <input id="message" type="text" placeholder="Type a message..." />
+            <button id="send"><i class="fas fa-paper-plane"></i></button>
+        </div>
+    </div>
+
+    <!-- Join Modal -->
+    <div id="nameModal">
+        <div id="nameModalContent">
+            <h2 class="modal-title">Welcome to ChatHub</h2>
+            <select id="roomSelect" class="modal-input">
+                <option value="">-- Select a room --</option>
+            </select>
+            <p style="margin: 5px 0; text-align: center; color: #6c757d;">or create new:</p>
+            <input id="roomInput" class="modal-input" type="text" placeholder="New room name (optional)" />
+            <input id="nameInput" class="modal-input" type="text" placeholder="Your name" />
+            <button id="setName" class="modal-button">Enter Chat</button>
+            <div id="errorMsg"></div>
+        </div>
+    </div>
+
+    <script src="/chat.js"></script>
+</body>
+
+</html>
